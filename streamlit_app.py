@@ -1,40 +1,118 @@
-from collections import namedtuple
-import altair as alt
-import math
-import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
-"""
-# Welcome to Streamlit!
+import pandas as pd
 
-Edit `/streamlit_app.py` to customize this app to your heart's desire :heart:
 
-If you have any questions, checkout our [documentation](https://docs.streamlit.io) and [community
-forums](https://discuss.streamlit.io).
+# Security
+#passlib,hashlib,bcrypt,scrypt
+import hashlib
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
-In the meantime, below is an example of what you can do with just a few lines of code:
-"""
+def check_hashes(password,hashed_text):
+    if make_hashes(password) == hashed_text:
+        return hashed_text
+    return False
+# DB Management
+import psycopg2
 
-menu = ["Home","Login","SignUp"]
-choice = st.sidebar.selectbox("Menu",menu)
+# Initialize connection.
+# Uses st.cache to only run once.
+@st.cache(allow_output_mutation=True, hash_funcs={"_thread.RLock": lambda _: None, "builtins.weakref":  lambda _: None})
+def init_connection():
+    return psycopg2.connect(**st.secrets["postgres"])
 
-with st.echo(code_location='below'):
-    total_points = st.slider("Number of points in spiral", 1, 5000, 2000)
-    num_turns = st.slider("Number of turns in spiral", 1, 100, 9)
+conn = init_connection()
 
-    Point = namedtuple('Point', 'x y')
-    data = []
+c = conn.cursor()
+# DB  Functions
+def create_usertable():
+    c.execute('CREATE TABLE IF NOT EXISTS userstable(username TEXT,password TEXT)')
 
-    points_per_turn = total_points / num_turns
 
-    for curr_point_num in range(total_points):
-        curr_turn, i = divmod(curr_point_num, points_per_turn)
-        angle = (curr_turn + 1) * 2 * math.pi * i / points_per_turn
-        radius = curr_point_num / total_points
-        x = radius * math.cos(angle)
-        y = radius * math.sin(angle)
-        data.append(Point(x, y))
+def add_userdata(username,password):
+    c.execute('INSERT INTO userstable(username,password) VALUES (%s,%s)',(username,password))
+    conn.commit()
 
-    st.altair_chart(alt.Chart(pd.DataFrame(data), height=500, width=500)
-        .mark_circle(color='#0068c9', opacity=0.5)
-        .encode(x='x:Q', y='y:Q'))
+def login_user(username,password):
+    print(f"SELECT * FROM userstable WHERE username='%s' AND password='%s'")
+    c.execute(f"SELECT * FROM userstable WHERE username=%s AND password=%s",(username,password))
+    data = c.fetchall()
+    return data
+
+
+def view_all_users():
+    c.execute('SELECT * FROM userstable')
+    data = c.fetchall()
+    return data
+
+
+
+def main():
+    """Simple Login App"""
+
+    st.title("Simple Login App")
+
+    menu = ["Home","Login","SignUp"]
+    choice = st.sidebar.selectbox("Menu",menu)
+
+    hide_menu_style = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        </style>
+        """
+    st.markdown(hide_menu_style, unsafe_allow_html=True)
+
+    if choice == "Home":
+        st.subheader("Home")
+
+    elif choice == "Login":
+        st.subheader("Login Section")
+
+        username = st.sidebar.text_input("User Name")
+        password = st.sidebar.text_input("Password",type='password')
+        if st.sidebar.checkbox("Login"):
+            # if password == '12345':
+            # create_usertable()
+            hashed_pswd = make_hashes(password)
+
+            result = login_user(username,check_hashes(password,hashed_pswd))
+            if result:
+
+                st.success("Logged In as {}".format(username))
+
+                task = st.selectbox("Task",["Calender","Analytics","Profiles"])
+                if task == "Calender":
+                    st.subheader("Calendert")
+                    components.iframe("https://calendar.google.com/calendar/embed?src=brocoworking%40gmail.com&ctz=Europe%2FStockholm style=border: 0 width=800 height=600 frameborder=",800,600,False)
+
+                elif task == "Analytics":
+                    st.subheader("Analytics")
+                elif task == "Profiles":
+                    st.subheader("User Profiles")
+                    user_result = view_all_users()
+                    clean_db = pd.DataFrame(user_result,columns=["Username","Password"])
+                    st.dataframe(clean_db)
+            else:
+                st.warning("Incorrect Username/Password")
+
+
+
+
+
+    elif choice == "SignUp":
+        st.subheader("Create New Account")
+        new_user = st.text_input("Username")
+        new_password = st.text_input("Password",type='password')
+
+        if st.button("Signup"):
+            # create_usertable()
+            add_userdata(new_user,make_hashes(new_password))
+            st.success("You have successfully created a valid Account")
+            st.info("Go to Login Menu to login")
+
+
+
+if __name__ == '__main__':
+    main()
